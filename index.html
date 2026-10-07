@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1113">
+<title>Sub Transfer</title>
+<style>
+  :root{--bg:#0e1113;--card:#1a1d21;--line:#2a2f35;--fg:#e8eaed;--mut:#9aa3ad;--acc:#ff5700;--ok:#3ecf8e;--err:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;padding:12px;max-width:640px;margin:auto}
+  h1{font-size:20px;margin:6px 0 12px}
+  h2{font-size:15px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+  button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px;margin:2px 4px 2px 0}
+  button.sec{background:#2a2f35}
+  button:disabled{opacity:.4}
+  input[type=text],textarea{width:100%;background:#0e1113;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:15px}
+  textarea{height:90px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .mut{color:var(--mut);font-size:13px}
+  .ok{color:var(--ok)}.err{color:var(--err)}
+  #list{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:8px}
+  #list label{display:flex;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center}
+  #list label.done{opacity:.45}
+  #list input{width:20px;height:20px}
+  #log{white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace;max-height:220px;overflow:auto;background:#0e1113;border-radius:8px;padding:8px}
+  code{background:#0e1113;padding:1px 5px;border-radius:4px;word-break:break-all}
+  progress{width:100%;height:10px}
+</style>
+</head>
+<body>
+<h1>Subreddit Transfer</h1>
+
+<div class="card">
+  <h2>0 · Setup (one time)</h2>
+  <p class="mut">Create an <b>installed app</b> at <code>reddit.com/prefs/apps</code> and set its redirect URI to exactly:</p>
+  <p><code id="redir"></code></p>
+  <input type="text" id="cid" placeholder="Reddit app client ID" autocapitalize="off" autocomplete="off">
+  <p class="mut">Needed only to log in. Importing a file needs no setup.</p>
+</div>
+
+<div class="card">
+  <h2>1 · Get the list</h2>
+  <p class="mut" id="srcStatus">Not connected.</p>
+  <button id="srcLogin">Log in to source account</button>
+  <button class="sec" id="pickFile">Import file…</button>
+  <input type="file" id="file" accept=".csv,.txt,text/*" hidden>
+  <details style="margin-top:8px"><summary class="mut">Paste a list instead</summary>
+    <textarea id="paste" placeholder="One subreddit per line, or comma-separated. r/ prefixes are fine."></textarea>
+    <button class="sec" id="usePaste">Use pasted list</button>
+  </details>
+  <p class="mut">Banned account? Request your data at <code>reddit.com/settings/data-request</code> and import <code>subscribed_subreddits.csv</code> from the export.</p>
+</div>
+
+<div class="card">
+  <h2>2 · Pick subreddits</h2>
+  <div class="row">
+    <input type="text" id="filter" placeholder="Filter…" style="flex:1">
+  </div>
+  <div class="row" style="margin-top:6px">
+    <button class="sec" id="all">Select all</button>
+    <button class="sec" id="none">None</button>
+    <button class="sec" id="save">Save list (.txt)</button>
+    <span class="mut" id="count"></span>
+  </div>
+  <div id="list"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Subscribe on target account</h2>
+  <p class="mut">Switch to the target account on reddit.com first, then log in here.</p>
+  <p class="mut" id="dstStatus">Not connected.</p>
+  <button id="dstLogin">Log in to target account</button>
+  <button id="go" disabled>Transfer selected</button>
+  <progress id="prog" value="0" max="1" hidden></progress>
+  <div id="log" hidden></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const API = 'https://oauth.reddit.com';
+const REDIRECT = location.origin + location.pathname;
+let subs = [];            // [{name, checked, done}]
+const tok = {};           // role -> {token, exp, user}
+
+$('redir').textContent = REDIRECT;
+$('cid').value = localStorage.getItem('cid') || '';
+$('cid').addEventListener('change', e => localStorage.setItem('cid', e.target.value.trim()));
+
+// ---------- auth ----------
+function login(role){
+  const cid = $('cid').value.trim();
+  if(!cid){ alert('Enter your Reddit app client ID first.'); return; }
+  localStorage.setItem('cid', cid);
+  const q = new URLSearchParams({client_id:cid, response_type:'token', state:role,
+    redirect_uri:REDIRECT, scope:'identity mysubreddits subscribe'});
+  location.href = 'https://www.reddit.com/api/v1/authorize.compact?' + q;
+}
+function loadTokens(){
+  if(location.hash.includes('access_token')){
+    const p = new URLSearchParams(location.hash.slice(1));
+    const role = p.get('state');
+    if(role==='src'||role==='dst'){
+      localStorage.setItem('tok_'+role, JSON.stringify({token:p.get('access_token'), exp:Date.now()+ (+p.get('expires_in')||3600)*1000-60000}));
+    }
+    history.replaceState(null,'',location.pathname);
+  } else if(location.hash.includes('error')){
+    alert('Reddit login failed: '+new URLSearchParams(location.hash.slice(1)).get('error'));
+    history.replaceState(null,'',location.pathname);
+  }
+  for(const role of ['src','dst']){
+    try{
+      const t = JSON.parse(localStorage.getItem('tok_'+role)||'null');
+      if(t && t.exp>Date.now()) tok[role]=t; else localStorage.removeItem('tok_'+role);
+    }catch{}
+  }
+}
+async function api(role, path, opts={}){
+  const r = await fetch(API+path, {...opts, headers:{Authorization:'bearer '+tok[role].token, ...(opts.headers||{})}});
+  return r;
+}
+async function whoami(role){
+  const r = await api(role,'/api/v1/me?raw_json=1');
+  if(!r.ok) throw new Error('identity '+r.status);
+  return (await r.json()).name;
+}
+
+// ---------- list handling ----------
+function parseList(text){
+  const out = new Set();
+  for(let line of text.split(/[\r\n,]+/)){
+    line = line.trim().replace(/^["']|["']$/g,'').replace(/^\/?r\//i,'').trim();
+    if(!line || /^(subreddit|name|display_name)$/i.test(line)) continue;
+    if(/^[A-Za-z0-9_]{2,25}$/.test(line)) out.add(line);
+  }
+  return [...out];
+}
+function setSubs(names){
+  const seen = new Map(subs.map(s=>[s.name.toLowerCase(), s]));
+  for(const n of names) if(!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), {name:n, checked:true, done:false});
+  subs = [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
+  render();
+}
+function render(){
+  const f = $('filter').value.toLowerCase();
+  const box = $('list'); box.innerHTML='';
+  subs.forEach(s=>{
+    if(f && !s.name.toLowerCase().includes(f)) return;
+    const l = document.createElement('label'); if(s.done) l.className='done';
+    const c = document.createElement('input'); c.type='checkbox'; c.checked=s.checked;
+    c.onchange = ()=>{ s.checked=c.checked; updateCount(); };
+    l.append(c, document.createTextNode(s.name + (s.done?'  ✓':'')));
+    box.append(l);
+  });
+  updateCount();
+}
+function updateCount(){
+  const n = subs.filter(s=>s.checked&&!s.done).length;
+  $('count').textContent = `${n} selected / ${subs.length}`;
+  $('go').disabled = !(tok.dst && n);
+}
+$('filter').oninput = render;
+$('all').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=true;}); render(); };
+$('none').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=false;}); render(); };
+$('save').onclick = ()=>{
+  const blob = new Blob([subs.map(s=>s.name).join('\n')], {type:'text/plain'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='subreddits.txt'; a.click();
+};
+$('pickFile').onclick = ()=>$('file').click();
+$('file').onchange = async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const names = parseList(await f.text());
+  setSubs(names); $('srcStatus').innerHTML = `<span class="ok">Imported ${names.length} subreddits from ${f.name}.</span>`;
+  e.target.value='';
+};
+$('usePaste').onclick = ()=>{
+  const names = parseList($('paste').value);
+  setSubs(names); $('srcStatus').innerHTML = `<span class="ok">Loaded ${names.length} subreddits.</span>`;
+};
+
+// ---------- fetch source subs ----------
+async function fetchSource(){
+  const names=[]; let after=null;
+  do{
+    const r = await api('src', `/subreddits/mine/subscriber?limit=100&raw_json=1${after?'&after='+after:''}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    j.data.children.forEach(c=>names.push(c.data.display_name));
+    after = j.data.after;
+    $('srcStatus').textContent = `Fetching… ${names.length}`;
+  } while(after);
+  return names;
+}
+
+// ---------- subscribe ----------
+const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+function log(msg, cls){
+  const l=$('log'); l.hidden=false;
+  const d=document.createElement('div'); if(cls) d.className=cls; d.textContent=msg; l.append(d); l.scrollTop=l.scrollHeight;
+}
+async function subscribe(names){
+  const body = new URLSearchParams({action:'sub', sr_name:names.join(','), skip_initial_defaults:'true'});
+  const r = await api('dst','/api/subscribe',{method:'POST', body});
+  const rem = +r.headers.get('x-ratelimit-remaining'), reset = +r.headers.get('x-ratelimit-reset');
+  if(r.status===429){ await sleep(((+r.headers.get('retry-after'))||reset||30)*1000+500); return subscribe(names); }
+  if(rem && rem<3 && reset) await sleep(reset*1000+300);
+  return r.ok;
+}
+async function transfer(){
+  const todo = subs.filter(s=>s.checked&&!s.done);
+  $('go').disabled=true; $('prog').hidden=false; $('prog').max=todo.length; $('prog').value=0;
+  let ok=0, fail=[];
+  for(let i=0;i<todo.length;i+=10){
+    const batch = todo.slice(i,i+10);
+    let good = false;
+    try{ good = await subscribe(batch.map(s=>s.name)); }catch(e){ log('Network error: '+e.message,'err'); }
+    if(good){ batch.forEach(s=>s.done=true); ok+=batch.length; }
+    else for(const s of batch){            // retry one by one so one bad sub doesn't sink the batch
+      try{ if(await subscribe([s.name])){ s.done=true; ok++; } else fail.push(s.name); }
+      catch{ fail.push(s.name); }
+    }
+    $('prog').value=Math.min(i+10,todo.length);
+    log(`Done ${Math.min(i+10,todo.length)}/${todo.length}`);
+    render();
+    await sleep(600);
+  }
+  log(`Finished: ${ok} subscribed, ${fail.length} failed.`, fail.length?'err':'ok');
+  if(fail.length) log('Failed (banned/private/quarantined/removed?): '+fail.join(', '),'err');
+  updateCount();
+}
+
+// ---------- wiring ----------
+$('srcLogin').onclick = ()=>login('src');
+$('dstLogin').onclick = ()=>login('dst');
+$('go').onclick = transfer;
+
+(async function init(){
+  loadTokens();
+  if(tok.src){
+    try{
+      const u = await whoami('src');
+      $('srcStatus').textContent = `Connected as u/${u}. Fetching…`;
+      const names = await fetchSource();
+      setSubs(names);
+      $('srcStatus').innerHTML = `<span class="ok">u/${u}: ${names.length} subscriptions loaded.</span>`;
+    }catch(e){ $('srcStatus').innerHTML = `<span class="err">Source error: ${e.message}. Account may be suspended — use file import.</span>`; }
+  }
+  if(tok.dst){
+    try{
+      const u = await whoami('dst');
+      $('dstStatus').innerHTML = `<span class="ok">Connected as u/${u}.</span>`;
+    }catch(e){ $('dstStatus').innerHTML = `<span class="err">Target error: ${e.message}</span>`; delete tok.dst; }
+  }
+  updateCount();
+})();
+</script>
+</body>
+</html>
