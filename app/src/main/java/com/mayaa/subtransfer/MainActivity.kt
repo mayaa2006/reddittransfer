@@ -23,6 +23,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Hosts the bundled index.html in a WebView.
@@ -306,6 +308,34 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
                 "Saved to Downloads/$name"
             } else "Could not save file"
             runOnUiThread { Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show() }
+        }
+
+        /** GETs a reddit.com URL natively (no CORS) and calls window.onNative(id, ok, text). */
+        @JavascriptInterface
+        fun fetchUrl(id: String, url: String) {
+            Thread {
+                var ok = false
+                var body: String
+                try {
+                    val u = URL(url)
+                    require(u.protocol == "https" && (u.host == "reddit.com" || u.host.endsWith(".reddit.com")))
+                    val c = u.openConnection() as HttpURLConnection
+                    c.connectTimeout = 15000
+                    c.readTimeout = 15000
+                    c.setRequestProperty("User-Agent", "android:com.mayaa.subtransfer:v1.0 (personal tool)")
+                    c.setRequestProperty("Accept", "application/json")
+                    val code = c.responseCode
+                    ok = code in 200..299
+                    body = if (ok) c.inputStream.bufferedReader().readText() else "HTTP $code"
+                } catch (e: Exception) {
+                    body = e.message ?: "network error"
+                }
+                runOnUiThread {
+                    web.evaluateJavascript(
+                        "window.onNative(${JSONObject.quote(id)}, $ok, ${JSONObject.quote(body)})", null
+                    )
+                }
+            }.start()
         }
 
         /** Opens the in-app Reddit login and subscribes the given names (JSON array). */

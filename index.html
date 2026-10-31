@@ -46,6 +46,11 @@
   <button id="srcLogin">Log in to source account</button>
   <button class="sec" id="pickFile">Import file…</button>
   <input type="file" id="file" accept=".csv,.txt,text/*" hidden>
+  <div style="margin-top:8px">
+    <input type="text" id="link" placeholder="Paste a multireddit link (reddit.com/user/…/m/…)" autocapitalize="off" autocomplete="off">
+    <button class="sec" id="loadLink" style="margin-top:6px">Load from link</button>
+    <p class="mut">Public multireddits only. Links like <code>reddit.com/r/one+two+three</code> work too.</p>
+  </div>
   <details style="margin-top:8px"><summary class="mut">Paste a list instead</summary>
     <textarea id="paste" placeholder="One subreddit per line, or comma-separated. r/ prefixes are fine."></textarea>
     <button class="sec" id="usePaste">Use pasted list</button>
@@ -188,6 +193,39 @@ $('file').onchange = async e=>{
 $('usePaste').onclick = ()=>{
   const names = parseList($('paste').value);
   setSubs(names); $('srcStatus').innerHTML = `<span class="ok">Loaded ${names.length} subreddits.</span>`;
+};
+
+// ---------- load from multireddit link ----------
+const pendingNative = {};
+window.onNative = (id, ok, text)=>{
+  const p = pendingNative[id]; if(!p) return; delete pendingNative[id];
+  ok ? p.res(text) : p.rej(new Error(text));
+};
+function getText(url){
+  if(APP) return new Promise((res,rej)=>{ const id = String(Date.now()+Math.random()); pendingNative[id]={res,rej}; APP.fetchUrl(id,url); });
+  return fetch(url).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
+}
+$('loadLink').onclick = async ()=>{
+  const t = $('link').value.trim();
+  const st = $('srcStatus');
+  try{
+    let names = [];
+    const plus = t.match(/\/r\/([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)/);
+    if(plus){ names = plus[1].split('+'); }
+    else{
+      const m = t.match(/(?:user|u)\/([^\/\s?#]+)\/m\/([^\/\s?#]+)/i);
+      if(!m) throw new Error('That does not look like a multireddit link.');
+      st.textContent = 'Loading multireddit…';
+      const j = JSON.parse(await getText(`https://www.reddit.com/api/multi/user/${encodeURIComponent(m[1])}/m/${encodeURIComponent(m[2])}?raw_json=1`));
+      names = ((j.data&&j.data.subreddits)||[]).map(s=>s.name||s.display_name).filter(Boolean);
+    }
+    names = names.filter(n=>/^[A-Za-z0-9_]{2,25}$/.test(n));
+    if(!names.length) throw new Error('No subreddits found in that link.');
+    setSubs(names);
+    st.innerHTML = `<span class="ok">Loaded ${names.length} subreddits from the link.</span>`;
+  }catch(e){
+    st.innerHTML = `<span class="err">Could not load: ${e.message}. Private multireddits and some links can't be read; use the export file instead.</span>`;
+  }
 };
 
 // ---------- fetch source subs ----------
