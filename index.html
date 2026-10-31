@@ -62,6 +62,7 @@
     <button class="sec" id="all">Select all</button>
     <button class="sec" id="none">None</button>
     <button class="sec" id="save">Save list (.txt)</button>
+    <button class="sec" id="clear">Clear</button>
     <span class="mut" id="count"></span>
   </div>
   <div id="list"></div>
@@ -80,7 +81,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const API = 'https://oauth.reddit.com';
-const REDIRECT = location.origin + location.pathname;
+const APP = window.AndroidBridge || null;   // present only inside the Android app
+const REDIRECT = APP ? 'subtransfer://auth' : location.origin + location.pathname;
 let subs = [];            // [{name, checked, done}]
 const tok = {};           // role -> {token, exp, user}
 
@@ -142,6 +144,10 @@ function setSubs(names){
   subs = [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
   render();
 }
+function persist(){ try{ localStorage.setItem('subs', JSON.stringify(subs)); }catch{} }
+function restore(){
+  try{ const s = JSON.parse(localStorage.getItem('subs')||'[]'); if(Array.isArray(s)) subs = s.filter(x=>x&&x.name); }catch{}
+}
 function render(){
   const f = $('filter').value.toLowerCase();
   const box = $('list'); box.innerHTML='';
@@ -156,6 +162,7 @@ function render(){
   updateCount();
 }
 function updateCount(){
+  persist();
   const n = subs.filter(s=>s.checked&&!s.done).length;
   $('count').textContent = `${n} selected / ${subs.length}`;
   $('go').disabled = !(tok.dst && n);
@@ -163,7 +170,9 @@ function updateCount(){
 $('filter').oninput = render;
 $('all').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=true;}); render(); };
 $('none').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=false;}); render(); };
+$('clear').onclick = ()=>{ if(confirm('Clear the whole list?')){ subs=[]; render(); $('srcStatus').textContent='Not connected.'; } };
 $('save').onclick = ()=>{
+  if(APP){ APP.saveText('subreddits.txt', subs.map(s=>s.name).join('\n')); return; }
   const blob = new Blob([subs.map(s=>s.name).join('\n')], {type:'text/plain'});
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='subreddits.txt'; a.click();
 };
@@ -236,6 +245,8 @@ $('dstLogin').onclick = ()=>login('dst');
 $('go').onclick = transfer;
 
 (async function init(){
+  restore();
+  if(subs.length){ render(); $('srcStatus').innerHTML = `<span class="ok">${subs.length} subreddits in your list.</span>`; }
   loadTokens();
   if(tok.src){
     try{
