@@ -33,7 +33,7 @@
 <h1>Subreddit Transfer</h1>
 
 <div class="card">
-  <h2>0 · Setup (one time)</h2>
+  <h2>0 · Setup (only for the Reddit-app method)</h2>
   <p class="mut">Create an <b>installed app</b> at <code>reddit.com/prefs/apps</code> and set its redirect URI to exactly:</p>
   <p><code id="redir"></code></p>
   <input type="text" id="cid" placeholder="Reddit app client ID" autocapitalize="off" autocomplete="off">
@@ -74,6 +74,8 @@
   <p class="mut" id="dstStatus">Not connected.</p>
   <button id="dstLogin">Log in to target account</button>
   <button id="go" disabled>Transfer selected</button>
+  <button id="cookieGo" hidden>Transfer without a Reddit app</button>
+  <p class="mut" id="cookieNote" hidden>No client ID needed: you log in to Reddit inside the app, then it subscribes using that login. Password login works best (Google sign-in is often blocked in in-app browsers).</p>
   <progress id="prog" value="0" max="1" hidden></progress>
   <div id="log" hidden></div>
 </div>
@@ -243,6 +245,24 @@ async function transfer(){
 $('srcLogin').onclick = ()=>login('src');
 $('dstLogin').onclick = ()=>login('dst');
 $('go').onclick = transfer;
+
+// No-Reddit-app mode (Android app only): the app logs in via an in-app browser and subscribes there.
+if(APP){
+  $('cookieGo').hidden = false; $('cookieNote').hidden = false;
+  $('cookieGo').onclick = ()=>{
+    const names = subs.filter(s=>s.checked&&!s.done).map(s=>s.name);
+    if(!names.length){ alert('Nothing selected.'); return; }
+    APP.cookieTransfer(JSON.stringify(names));
+  };
+  window.onCookieResult = (user, ok, fail)=>{
+    const okSet = new Set(ok.map(n=>n.toLowerCase()));
+    subs.forEach(s=>{ if(okSet.has(s.name.toLowerCase())) s.done = true; });
+    $('dstStatus').innerHTML = `<span class="ok">u/${user}: ${ok.length} subscribed.</span>`;
+    log(`Finished as u/${user}: ${ok.length} subscribed, ${fail.length} failed.`, fail.length?'err':'ok');
+    if(fail.length) log('Failed (banned/private/quarantined/removed?): '+fail.join(', '),'err');
+    render();
+  };
+}
 
 (async function init(){
   restore();
