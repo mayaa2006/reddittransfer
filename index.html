@@ -66,6 +66,7 @@
   <div class="row" style="margin-top:6px">
     <button class="sec" id="all">Select all</button>
     <button class="sec" id="none">None</button>
+    <button class="sec" id="reset">Reset ✓</button>
     <button class="sec" id="save">Save list (.txt)</button>
     <button class="sec" id="clear">Clear</button>
     <span class="mut" id="count"></span>
@@ -162,7 +163,7 @@ function render(){
     if(f && !s.name.toLowerCase().includes(f)) return;
     const l = document.createElement('label'); if(s.done) l.className='done';
     const c = document.createElement('input'); c.type='checkbox'; c.checked=s.checked;
-    c.onchange = ()=>{ s.checked=c.checked; updateCount(); };
+    c.onchange = ()=>{ s.checked=c.checked; if(s.done && c.checked){ s.done=false; render(); } else updateCount(); };
     l.append(c, document.createTextNode(s.name + (s.done?'  ✓':'')));
     box.append(l);
   });
@@ -175,8 +176,9 @@ function updateCount(){
   $('go').disabled = !(tok.dst && n);
 }
 $('filter').oninput = render;
-$('all').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=true;}); render(); };
+$('all').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)){ s.checked=true; s.done=false; }}); render(); };
 $('none').onclick = ()=>{ const f=$('filter').value.toLowerCase(); subs.forEach(s=>{ if(!f||s.name.toLowerCase().includes(f)) s.checked=false;}); render(); };
+$('reset').onclick = ()=>{ subs.forEach(s=>{ s.done=false; s.checked=true; }); render(); };
 $('clear').onclick = ()=>{ if(confirm('Clear the whole list?')){ subs=[]; render(); $('srcStatus').textContent='Not connected.'; } };
 $('save').onclick = ()=>{
   if(APP){ APP.saveText('subreddits.txt', subs.map(s=>s.name).join('\n')); return; }
