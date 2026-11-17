@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.view.Gravity
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -211,6 +212,13 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
             text = "Back"
             setOnClickListener { showMain() }
         }
+        val signOut = Button(this).apply {
+            text = "Sign out"
+            setOnClickListener {
+                clearRedditCookies("Signed out of Reddit")
+                rw.loadUrl("https://$OLD/login")
+            }
+        }
         val start = Button(this).apply {
             text = "Start"
             setOnClickListener {
@@ -227,6 +235,7 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
             setBackgroundColor(Color.parseColor("#1a1d21"))
             addView(back)
             addView(status, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(signOut)
             addView(start)
         }
         val root = LinearLayout(this).apply {
@@ -238,6 +247,15 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
         redditView = root
         setContentView(root)
         rw.loadUrl("https://$OLD/login")
+    }
+
+    /** Removes all cookies (signs out of Reddit). The app's saved list is kept. */
+    private fun clearRedditCookies(toast: String?) {
+        val cm = CookieManager.getInstance()
+        cm.removeAllCookies {
+            cm.flush()
+            if (toast != null) Toast.makeText(this, toast, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun runTransfer() {
@@ -259,6 +277,7 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
 
         @JavascriptInterface
         fun finished(user: String, okJson: String, failJson: String) = runOnUiThread {
+            clearRedditCookies(null)
             showMain()
             web.evaluateJavascript(
                 "window.onCookieResult(${JSONObject.quote(user)}, $okJson, $failJson)", null
@@ -336,6 +355,12 @@ RedditBridge.finished(me.name,JSON.stringify(ok),JSON.stringify(fail))
                     )
                 }
             }.start()
+        }
+
+        /** Signs out of Reddit in the app by clearing cookies. */
+        @JavascriptInterface
+        fun clearCookies() {
+            runOnUiThread { clearRedditCookies("Signed out of Reddit") }
         }
 
         /** Opens the in-app Reddit login and subscribes the given names (JSON array). */

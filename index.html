@@ -81,7 +81,8 @@
   <button id="dstLogin">Log in to target account</button>
   <button id="go" disabled>Transfer selected</button>
   <button id="cookieGo" hidden>Transfer without a Reddit app</button>
-  <p class="mut" id="cookieNote" hidden>No client ID needed: you log in to Reddit inside the app, then it subscribes using that login. Password login works best (Google sign-in is often blocked in in-app browsers).</p>
+  <button class="sec" id="signOut">Sign out / clear login</button>
+  <p class="mut" id="cookieNote" hidden>No client ID needed: you log in to Reddit inside the app, then it subscribes using that login. You're signed out automatically when it finishes. Password login works best (Google sign-in is often blocked in in-app browsers).</p>
   <progress id="prog" value="0" max="1" hidden></progress>
   <div id="log" hidden></div>
 </div>
@@ -285,6 +286,14 @@ async function transfer(){
 $('srcLogin').onclick = ()=>login('src');
 $('dstLogin').onclick = ()=>login('dst');
 $('go').onclick = transfer;
+
+$('signOut').onclick = ()=>{
+  localStorage.removeItem('tok_src'); localStorage.removeItem('tok_dst');
+  delete tok.src; delete tok.dst;
+  $('dstStatus').textContent = 'Not connected.';
+  if(APP) APP.clearCookies(); else alert('Signed out here. Also log out on reddit.com before logging in as another account.');
+  updateCount();
+};
 
 // No-Reddit-app mode (Android app only): the app logs in via an in-app browser and subscribes there.
 if(APP){
