@@ -11,8 +11,19 @@ android {
         applicationId = "com.mayaa.subtransfer"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Every CI build gets a higher version so Android accepts it as an update.
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+    }
+
+    // One fixed signing key for every build, so new APKs install over old ones.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("subtransfer.keystore")
+            storePassword = "subtransfer"
+            keyAlias = "subtransfer"
+            keyPassword = "subtransfer"
+        }
     }
 
     compileOptions {
